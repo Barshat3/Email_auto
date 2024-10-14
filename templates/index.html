@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Email Sender</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bulk Email Sender</h1>
+    <form id="email-form">
+        <label for="csv-file">Select CSV file:</label>
+        <input type="file" id="csv-file" accept=".csv">
+        <br><br>
+
+        <label for="subject">Enter email subject:</label>
+        <input type="text" id="subject" required>
+        <br><br>
+
+        <label for="mail">Enter mail body:</label>
+        <textarea id="mail" required></textarea>
+        <br><br>
+
+        <label for="email">Your Email:</label>
+        <input type="email" id="email" required>
+        <br><br>
+
+        <label for="password">Your Password:</label>
+        <input type="password" id="password" required>
+        <br><br>
+
+        <button id="send-emails">Send Emails</button>
+    </form>
+
+    <div id="result"></div>
+
+    <!-- Embedded JavaScript directly in the HTML -->
+    <script>
+        const form = document.getElementById('email-form');
+        const csvFileInput = document.getElementById('csv-file');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const sendEmailsButton = document.getElementById('send-emails');
+        const resultDiv = document.getElementById('result');
+
+        sendEmailsButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            const csvFile = csvFileInput.files[0];
+            const userEmail = emailInput.value;
+            const userPassword = passwordInput.value;
+            const mailBody = document.getElementById('mail').value;
+            const subject = document.getElementById('subject').value;  // Get the subject
+
+            const formData = new FormData();
+            formData.append('csv_file', csvFile);
+            formData.append('email', userEmail);
+            formData.append('password', userPassword);
+            formData.append('mail', mailBody);
+            formData.append('subject', subject);  // Append the subject
+
+            fetch('/send-emails', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                resultDiv.innerHTML = data.message;
+            })
+            .catch(error => {
+                console.error(error);
+                resultDiv.innerHTML = 'Error sending emails!';
+            });
+        });
+    </script>
+</body>
+</html>
