@@ -268,24 +268,6 @@
             font-weight: 500;
         }
 
-        /* Progress Panel */
-        .progress-panel {
-            margin-top: 20px;
-            background: #fff;
-            border: 2px solid #e9ecef;
-            border-radius: 15px;
-            padding: 16px;
-            display: none;
-        }
-        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .progress-bar-wrap { width: 100%; background: #eee; border-radius: 8px; height: 12px; overflow: hidden; }
-        .progress-bar { height: 12px; width: 0%; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); transition: width 0.2s ease; }
-        .progress-counts { font-size: 14px; color: #555; margin-top: 8px; }
-        .events { margin-top: 12px; max-height: 220px; overflow: auto; background: #f9fafb; border-radius: 10px; padding: 10px; border: 1px solid #eee; }
-        .event-item { font-size: 13px; margin-bottom: 6px; }
-        .event-success { color: #0f7b0f; }
-        .event-error { color: #b00020; }
-
         .result.success {
             background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
             color: #155724;
@@ -323,16 +305,10 @@
             <div class="logo">📧</div>
             <div class="header-info">
                 <h1>Bulk Email Sender</h1>
-                <div class="user-email">{{ 'Logged in as: ' + user_email if user_email else 'Not logged in' }}</div>
+                <div class="user-email">Logged in as: {{ user_email }}</div>
             </div>
         </div>
-        <div>
-            {% if user_email %}
-            <a href="/logout" class="logout-btn" id="logoutLink">🚪 Logout</a>
-            {% else %}
-            <a href="/login" class="logout-btn" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">🔐 Login</a>
-            {% endif %}
-        </div>
+        <a href="/logout" class="logout-btn">🚪 Logout</a>
     </div>
 
     <div class="main-container">
@@ -346,7 +322,7 @@
                     <div class="form-group">
                         <label for="csv-file">Upload CSV File</label>
                         <div class="file-input-wrapper">
-                            <input type="file" id="csv-file" name="csv_file" class="file-input" accept=".csv" required>
+                            <input type="file" id="csv-file" class="file-input" accept=".csv" required>
                             <label for="csv-file" class="file-input-button">
                                 📂 Choose CSV File
                             </label>
@@ -365,7 +341,7 @@
                     <div class="form-group">
                         <label for="image-attachment">Image Attachment (Optional)</label>
                         <div class="file-input-wrapper">
-                            <input type="file" id="image-attachment" name="image_attachment" class="file-input" accept=".jpg,.jpeg,.png,.gif,.bmp">
+                            <input type="file" id="image-attachment" class="file-input" accept=".jpg,.jpeg,.png,.gif,.bmp">
                             <label for="image-attachment" class="file-input-button">
                                 🖼️ Choose Image
                             </label>
@@ -383,7 +359,7 @@
                     Email Subject
                 </div>
                 <div class="form-group">
-                    <input type="text" id="subject" name="subject" placeholder="Enter your email subject here..." required>
+                    <input type="text" id="subject" placeholder="Enter your email subject here..." required>
                 </div>
             </div>
 
@@ -396,7 +372,7 @@
                     ✨ Each email will automatically start with "Hello [Name]," followed by your message below.
                 </div>
                 <div class="form-group">
-                    <textarea id="mail" name="mail" placeholder="Write your email message here..." required></textarea>
+                    <textarea id="mail" placeholder="Write your email message here..." required></textarea>
                 </div>
             </div>
 
@@ -407,17 +383,6 @@
         </form>
 
         <div id="result" class="result"></div>
-        <div id="progressPanel" class="progress-panel">
-            <div class="progress-header">
-                <div id="progressTitle">Sending...</div>
-                <div id="progressPct">0%</div>
-            </div>
-            <div class="progress-bar-wrap">
-                <div id="progressBar" class="progress-bar"></div>
-            </div>
-            <div id="progressCounts" class="progress-counts">Sent: 0 • Failed: 0 • Total: 0</div>
-            <div id="events" class="events"></div>
-        </div>
     </div>
 
     <script>
@@ -426,177 +391,9 @@
         const loadingSpinner = document.getElementById('loadingSpinner');
         const btnText = document.getElementById('btnText');
         const resultDiv = document.getElementById('result');
-        const progressPanel = document.getElementById('progressPanel');
-        const progressBar = document.getElementById('progressBar');
-        const progressPct = document.getElementById('progressPct');
-        const progressTitle = document.getElementById('progressTitle');
-        const progressCounts = document.getElementById('progressCounts');
-        const eventsEl = document.getElementById('events');
 
         // File input change handlers
         document.getElementById('csv-file').addEventListener('change', function() {
             const label = this.nextElementSibling;
             if (this.files[0]) {
                 label.textContent = `📂 ${this.files[0].name}`;
-            } else {
-                label.textContent = '📂 Choose CSV File';
-            }
-        });
-
-        document.getElementById('image-attachment').addEventListener('change', function() {
-            const label = this.nextElementSibling;
-            if (this.files[0]) {
-                label.textContent = `🖼️ ${this.files[0].name}`;
-            } else {
-                label.textContent = '🖼️ Choose Image';
-            }
-        });
-
-        function setLoading(isLoading) {
-            if (isLoading) {
-                loadingSpinner.style.display = 'inline-block';
-                sendBtn.disabled = true;
-                btnText.textContent = 'Sending...';
-            } else {
-                loadingSpinner.style.display = 'none';
-                sendBtn.disabled = false;
-                btnText.textContent = '🚀 Send Personalized Emails';
-            }
-        }
-
-        function showSuccess(message) {
-            resultDiv.textContent = message;
-            resultDiv.className = 'result success';
-            resultDiv.style.display = 'block';
-        }
-
-        function showError(message) {
-            resultDiv.textContent = message;
-            resultDiv.className = 'result error';
-            resultDiv.style.display = 'block';
-        }
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            resultDiv.style.display = 'none';
-            resultDiv.className = 'result';
-            setLoading(true);
-
-            try {
-                const formData = new FormData();
-                const csvFile = document.getElementById('csv-file').files[0];
-                const imageFile = document.getElementById('image-attachment').files[0];
-                const subject = document.getElementById('subject').value.trim();
-                const mail = document.getElementById('mail').value.trim();
-
-                if (!csvFile || !subject || !mail) {
-                    showError('Please provide a CSV file, subject, and message.');
-                    return;
-                }
-
-                // Require login first: email must be in session
-                const email = {{ user_email|tojson }};
-                if (!email) {
-                    showError('Please login first. Redirecting to login...');
-                    setTimeout(() => { window.location.href = '/login'; }, 800);
-                    return;
-                }
-                // Password must exist in sessionStorage (set on login page)
-                let password = null;
-                try { password = sessionStorage.getItem('smtp_app_password'); } catch (e) {}
-                if (!password) {
-                    showError('Please set your App Password on the login page. Redirecting...');
-                    setTimeout(() => { window.location.href = '/login'; }, 1000);
-                    return;
-                }
-
-                // Prepare start-send payload
-                formData.append('csv_file', csvFile);
-                if (imageFile) formData.append('image_attachment', imageFile);
-                formData.append('subject', subject);
-                formData.append('mail', mail);
-                formData.append('password', password);
-
-                // Start SSE job
-                const response = await fetch('/start-send', { method: 'POST', body: formData });
-                const data = await response.json();
-                if (!response.ok) {
-                    showError(data.message || 'Failed to start sending.');
-                    return;
-                }
-
-                // Show progress panel
-                progressPanel.style.display = 'block';
-                eventsEl.innerHTML = '';
-                progressBar.style.width = '0%';
-                progressPct.textContent = '0%';
-                progressTitle.textContent = 'Sending...';
-                progressCounts.textContent = 'Sent: 0 • Failed: 0 • Total: 0';
-
-                const jobId = data.job_id;
-                const es = new EventSource(`/events/${jobId}`);
-                let total = 0;
-                es.onmessage = (evt) => {
-                    try {
-                        const payload = JSON.parse(evt.data);
-                        if (payload.type === 'start') {
-                            total = payload.total || 0;
-                            progressCounts.textContent = `Sent: 0 • Failed: 0 • Total: ${total}`;
-                        } else if (payload.type === 'success' || payload.type === 'error') {
-                            const sent = payload.sent || 0;
-                            const failed = payload.failed || 0;
-                            const idx = payload.index || sent + failed;
-                            const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
-                            progressBar.style.width = pct + '%';
-                            progressPct.textContent = pct + '%';
-                            progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${total}`;
-
-                            const div = document.createElement('div');
-                            div.className = 'event-item ' + (payload.type === 'success' ? 'event-success' : 'event-error');
-                            if (payload.type === 'success') {
-                                div.textContent = `#${idx} ✔ Sent to ${payload.name} <${payload.email}>`;
-                            } else {
-                                div.textContent = `#${idx} ✖ Failed to ${payload.name} <${payload.email}> — ${payload.error}`;
-                            }
-                            eventsEl.appendChild(div);
-                            eventsEl.scrollTop = eventsEl.scrollHeight;
-                        } else if (payload.type === 'fatal') {
-                            showError(`Fatal error: ${payload.error}`);
-                        } else if (payload.type === 'done') {
-                            const sent = payload.sent || 0;
-                            const failed = payload.failed || 0;
-                            const pct = 100;
-                            progressBar.style.width = pct + '%';
-                            progressPct.textContent = pct + '%';
-                            progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${payload.total || total}`;
-                            progressTitle.textContent = 'Completed';
-                            es.close();
-                            if (failed === 0) {
-                                showSuccess('All emails sent successfully!');
-                            } else {
-                                showError('Completed with some failures. Check details below.');
-                            }
-                        }
-                    } catch (e) {
-                        // ignore parse errors
-                    }
-                };
-                es.onerror = () => {
-                    // Connection may drop when job completes; ignore
-                };
-            } catch (err) {
-                showError('Network error. Please try again.');
-            } finally {
-                setLoading(false);
-            }
-        });
-        // Clear stored password on logout
-        const logoutLink = document.getElementById('logoutLink');
-        if (logoutLink) {
-            logoutLink.addEventListener('click', () => {
-                try { sessionStorage.removeItem('smtp_app_password'); } catch (e) {}
-            });
-        }
-    </script>
-</body>
-</html>
