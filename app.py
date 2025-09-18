@@ -195,48 +195,54 @@ def _run_send_job(job_id, email_sender, email_password, recipients, subject, mai
     })
 
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-            smtp.starttls()
-            smtp.login(email_sender, email_password)
+        # Create SMTP connection with timeout
+        smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
+        smtp.starttls()
+        smtp.login(email_sender, email_password)
 
-            for index, recipient in enumerate(recipients, start=1):
-                try:
-                    msg = MIMEMultipart()
-                    msg['From'] = email_sender
-                    msg['To'] = recipient['email']
-                    msg['Subject'] = subject
+        for index, recipient in enumerate(recipients, start=1):
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = email_sender
+                msg['To'] = recipient['email']
+                msg['Subject'] = subject
 
-                    personalized_body = f"Hello {recipient['name']},\n\n{mail_body}"
-                    msg.attach(MIMEText(personalized_body, 'plain'))
+                personalized_body = f"Hello {recipient['name']},\n\n{mail_body}"
+                msg.attach(MIMEText(personalized_body, 'plain'))
 
-                    if image_data and image_filename:
-                        attachment = MIMEBase('application', 'octet-stream')
-                        attachment.set_payload(image_data)
-                        encoders.encode_base64(attachment)
-                        attachment.add_header('Content-Disposition', f'attachment; filename= {image_filename}')
-                        msg.attach(attachment)
+                if image_data and image_filename:
+                    attachment = MIMEBase('application', 'octet-stream')
+                    attachment.set_payload(image_data)
+                    encoders.encode_base64(attachment)
+                    attachment.add_header('Content-Disposition', f'attachment; filename= {image_filename}')
+                    msg.attach(attachment)
 
-                    smtp.sendmail(email_sender, recipient['email'], msg.as_string())
-                    successful_sends += 1
-                    _enqueue_event(job_id, {
-                        'type': 'success',
-                        'index': index,
-                        'email': recipient['email'],
-                        'name': recipient['name'],
-                        'sent': successful_sends,
-                        'failed': failed_sends
-                    })
-                except Exception as send_error:
-                    failed_sends += 1
-                    _enqueue_event(job_id, {
-                        'type': 'error',
-                        'index': index,
-                        'email': recipient['email'],
-                        'name': recipient['name'],
-                        'error': str(send_error),
-                        'sent': successful_sends,
-                        'failed': failed_sends
-                    })
+                smtp.sendmail(email_sender, recipient['email'], msg.as_string())
+                successful_sends += 1
+                _enqueue_event(job_id, {
+                    'type': 'success',
+                    'index': index,
+                    'email': recipient['email'],
+                    'name': recipient['name'],
+                    'sent': successful_sends,
+                    'failed': failed_sends
+                })
+            except Exception as send_error:
+                failed_sends += 1
+                _enqueue_event(job_id, {
+                    'type': 'error',
+                    'index': index,
+                    'email': recipient['email'],
+                    'name': recipient['name'],
+                    'error': str(send_error),
+                    'sent': successful_sends,
+                    'failed': failed_sends
+                })
+            finally:
+                # Small delay to prevent overwhelming Gmail
+                time.sleep(0.5)
+        
+        smtp.quit()
     except Exception as e:
         _enqueue_event(job_id, {'type': 'fatal', 'error': str(e)})
     finally:
@@ -309,6 +315,10 @@ def start_send():
 
         if not recipients:
             return jsonify({'message': 'No valid email addresses found in CSV file'}), 400
+        
+        # Limit recipients for free tier (prevent timeout)
+        if len(recipients) > 50:
+            return jsonify({'message': 'Free tier limited to 50 recipients per batch. Please split your CSV.'}), 400
 
         # Attachment
         image_data = None
