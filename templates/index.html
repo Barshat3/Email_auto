@@ -575,7 +575,11 @@
                                 
                                 // Show final message
                                 if (statusData.status === 'failed') {
-                                    showError(`Job failed: ${statusData.error || 'Unknown error'}`);
+                                    let errorMsg = statusData.error || 'Unknown error';
+                                    if (errorMsg.includes('Network is unreachable') || errorMsg.includes('SMTP')) {
+                                        errorMsg = 'SMTP blocked by hosting provider. Try Railway instead of Render. See ALTERNATIVE_DEPLOYMENT.md for details.';
+                                    }
+                                    showError(`Job failed: ${errorMsg}`);
                                 } else if (failed === 0 && sent > 0) {
                                     showSuccess(`All ${sent} emails sent successfully!`);
                                 } else if (sent > 0) {

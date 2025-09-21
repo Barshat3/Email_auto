@@ -285,10 +285,33 @@ def _run_send_job_simple(job_id, email_sender, email_password, recipients, subje
     results = []
 
     try:
-        # Create SMTP connection with timeout
-        smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
-        smtp.starttls()
-        smtp.login(email_sender, email_password)
+        # Try multiple SMTP servers for better compatibility
+        smtp_servers = [
+            ("smtp.gmail.com", 587),
+            ("smtp.gmail.com", 465),
+            ("smtp.mail.yahoo.com", 587),
+            ("smtp.outlook.com", 587)
+        ]
+        
+        smtp = None
+        for server, port in smtp_servers:
+            try:
+                if port == 465:
+                    smtp = smtplib.SMTP_SSL(server, port, timeout=10)
+                else:
+                    smtp = smtplib.SMTP(server, port, timeout=10)
+                    smtp.starttls()
+                smtp.login(email_sender, email_password)
+                break
+            except Exception as e:
+                print(f"Failed to connect to {server}:{port} - {e}")
+                if smtp:
+                    smtp.quit()
+                smtp = None
+                continue
+        
+        if not smtp:
+            raise Exception("Unable to connect to any SMTP server. Render's free tier blocks outbound SMTP connections. Please use a paid service or self-host this application.")
 
         for index, recipient in enumerate(recipients, start=1):
             try:
