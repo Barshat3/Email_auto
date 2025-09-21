@@ -199,6 +199,9 @@ def _run_send_job(job_id, email_sender, email_password, recipients, subject, mai
         smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
         smtp.starttls()
         smtp.login(email_sender, email_password)
+        
+        # Test connection
+        _enqueue_event(job_id, {'type': 'info', 'message': 'Connected to Gmail SMTP successfully'})
 
         for index, recipient in enumerate(recipients, start=1):
             try:
@@ -377,6 +380,17 @@ def events(job_id):
             pass
 
     return Response(stream(), mimetype='text/event-stream')
+
+@app.route('/job-status/<job_id>')
+def job_status(job_id):
+    if job_id not in jobs:
+        return jsonify({'message': 'Job not found'}), 404
+    
+    job = jobs[job_id]
+    return jsonify({
+        'done': job['done'],
+        'started': job['started']
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

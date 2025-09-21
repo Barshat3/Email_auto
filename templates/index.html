@@ -522,6 +522,7 @@
                 const data = await response.json();
                 if (!response.ok) {
                     showError(data.message || 'Failed to start sending.');
+                    setLoading(false);
                     return;
                 }
 
@@ -536,7 +537,23 @@
                 const jobId = data.job_id;
                 const es = new EventSource(`/events/${jobId}`);
                 let total = 0;
+                let hasReceivedData = false;
+                let connectionLost = false;
+                
+                // Set a timeout to detect if connection is lost
+                const connectionTimeout = setTimeout(() => {
+                    if (!hasReceivedData) {
+                        connectionLost = true;
+                        es.close();
+                        showError('Connection lost. Please check your internet and try again.');
+                        setLoading(false);
+                    }
+                }, 10000); // 10 second timeout
+                
                 es.onmessage = (evt) => {
+                    hasReceivedData = true;
+                    clearTimeout(connectionTimeout);
+                    
                     try {
                         const payload = JSON.parse(evt.data);
                         if (payload.type === 'start') {
@@ -561,7 +578,9 @@
                             eventsEl.appendChild(div);
                             eventsEl.scrollTop = eventsEl.scrollHeight;
                         } else if (payload.type === 'fatal') {
+                            es.close();
                             showError(`Fatal error: ${payload.error}`);
+                            setLoading(false);
                         } else if (payload.type === 'done') {
                             const sent = payload.sent || 0;
                             const failed = payload.failed || 0;
@@ -571,18 +590,52 @@
                             progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${payload.total || total}`;
                             progressTitle.textContent = 'Completed';
                             es.close();
-                            if (failed === 0) {
-                                showSuccess('All emails sent successfully!');
+                            setLoading(false);
+                            if (failed === 0 && sent > 0) {
+                                showSuccess(`All ${sent} emails sent successfully!`);
+                            } else if (sent > 0) {
+                                showError(`Completed: ${sent} sent, ${failed} failed. Check details below.`);
                             } else {
-                                showError('Completed with some failures. Check details below.');
+                                showError('No emails were sent. Please check your credentials and try again.');
                             }
                         }
                     } catch (e) {
-                        // ignore parse errors
+                        console.error('Error parsing SSE data:', e);
                     }
                 };
-                es.onerror = () => {
-                    // Connection may drop when job completes; ignore
+                
+                es.onerror = (error) => {
+                    console.error('SSE connection error:', error);
+                    if (!connectionLost) {
+                        connectionLost = true;
+                        es.close();
+                        
+                        // Fallback: check job status after a delay
+                        setTimeout(async () => {
+                            try {
+                                const statusResponse = await fetch(`/job-status/${jobId}`);
+                                if (statusResponse.ok) {
+                                    const statusData = await statusResponse.json();
+                                    if (statusData.done) {
+                                        const sent = statusData.sent || 0;
+                                        const failed = statusData.failed || 0;
+                                        if (sent > 0) {
+                                            showSuccess(`Job completed: ${sent} sent, ${failed} failed`);
+                                        } else {
+                                            showError('Job completed but no emails were sent. Check your credentials.');
+                                        }
+                                    } else {
+                                        showError('Connection lost. Job may still be running. Please check your email for results.');
+                                    }
+                                } else {
+                                    showError('Connection lost during sending. Please check the logs and try again.');
+                                }
+                            } catch (e) {
+                                showError('Connection lost during sending. Please check the logs and try again.');
+                            }
+                            setLoading(false);
+                        }, 5000);
+                    }
                 };
             } catch (err) {
                 showError('Network error. Please try again.');
