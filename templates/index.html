@@ -535,108 +535,93 @@
                 progressCounts.textContent = 'Sent: 0 • Failed: 0 • Total: 0';
 
                 const jobId = data.job_id;
-                const es = new EventSource(`/events/${jobId}`);
-                let total = 0;
-                let hasReceivedData = false;
-                let connectionLost = false;
                 
-                // Set a timeout to detect if connection is lost
-                const connectionTimeout = setTimeout(() => {
-                    if (!hasReceivedData) {
-                        connectionLost = true;
-                        es.close();
-                        showError('Connection lost. Please check your internet and try again.');
-                        setLoading(false);
-                    }
-                }, 10000); // 10 second timeout
-                
-                es.onmessage = (evt) => {
-                    hasReceivedData = true;
-                    clearTimeout(connectionTimeout);
-                    
+                // Poll for job status
+                const pollInterval = setInterval(async () => {
                     try {
-                        const payload = JSON.parse(evt.data);
-                        if (payload.type === 'start') {
-                            total = payload.total || 0;
-                            progressCounts.textContent = `Sent: 0 • Failed: 0 • Total: ${total}`;
-                        } else if (payload.type === 'success' || payload.type === 'error') {
-                            const sent = payload.sent || 0;
-                            const failed = payload.failed || 0;
-                            const idx = payload.index || sent + failed;
-                            const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
-                            progressBar.style.width = pct + '%';
-                            progressPct.textContent = pct + '%';
-                            progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${total}`;
-
-                            const div = document.createElement('div');
-                            div.className = 'event-item ' + (payload.type === 'success' ? 'event-success' : 'event-error');
-                            if (payload.type === 'success') {
-                                div.textContent = `#${idx} ✔ Sent to ${payload.name} <${payload.email}>`;
+                        const statusResponse = await fetch(`/job-status/${jobId}`);
+                        if (statusResponse.ok) {
+                            const statusData = await statusResponse.json();
+                            
+                            if (statusData.status === 'completed' || statusData.status === 'failed') {
+                                clearInterval(pollInterval);
+                                setLoading(false);
+                                
+                                const sent = statusData.progress.sent || 0;
+                                const failed = statusData.progress.failed || 0;
+                                const total = statusData.progress.total || 0;
+                                
+                                // Update progress bar
+                                const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 100;
+                                progressBar.style.width = pct + '%';
+                                progressPct.textContent = pct + '%';
+                                progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${total}`;
+                                progressTitle.textContent = 'Completed';
+                                
+                                // Show results
+                                if (statusData.results) {
+                                    statusData.results.forEach(result => {
+                                        const div = document.createElement('div');
+                                        div.className = 'event-item ' + (result.type === 'success' ? 'event-success' : 'event-error');
+                                        if (result.type === 'success') {
+                                            div.textContent = `#${result.index} ✔ Sent to ${result.name} <${result.email}>`;
+                                        } else {
+                                            div.textContent = `#${result.index} ✖ Failed to ${result.name} <${result.email}> — ${result.error}`;
+                                        }
+                                        eventsEl.appendChild(div);
+                                    });
+                                    eventsEl.scrollTop = eventsEl.scrollHeight;
+                                }
+                                
+                                // Show final message
+                                if (statusData.status === 'failed') {
+                                    showError(`Job failed: ${statusData.error || 'Unknown error'}`);
+                                } else if (failed === 0 && sent > 0) {
+                                    showSuccess(`All ${sent} emails sent successfully!`);
+                                } else if (sent > 0) {
+                                    showError(`Completed: ${sent} sent, ${failed} failed. Check details below.`);
+                                } else {
+                                    showError('No emails were sent. Please check your credentials and try again.');
+                                }
                             } else {
-                                div.textContent = `#${idx} ✖ Failed to ${payload.name} <${payload.email}> — ${payload.error}`;
+                                // Update progress while running
+                                const sent = statusData.progress.sent || 0;
+                                const failed = statusData.progress.failed || 0;
+                                const total = statusData.progress.total || 0;
+                                const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
+                                
+                                progressBar.style.width = pct + '%';
+                                progressPct.textContent = pct + '%';
+                                progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${total}`;
+                                
+                                // Show latest results
+                                if (statusData.results && statusData.results.length > eventsEl.children.length) {
+                                    const newResults = statusData.results.slice(eventsEl.children.length);
+                                    newResults.forEach(result => {
+                                        const div = document.createElement('div');
+                                        div.className = 'event-item ' + (result.type === 'success' ? 'event-success' : 'event-error');
+                                        if (result.type === 'success') {
+                                            div.textContent = `#${result.index} ✔ Sent to ${result.name} <${result.email}>`;
+                                        } else {
+                                            div.textContent = `#${result.index} ✖ Failed to ${result.name} <${result.email}> — ${result.error}`;
+                                        }
+                                        eventsEl.appendChild(div);
+                                    });
+                                    eventsEl.scrollTop = eventsEl.scrollHeight;
+                                }
                             }
-                            eventsEl.appendChild(div);
-                            eventsEl.scrollTop = eventsEl.scrollHeight;
-                        } else if (payload.type === 'fatal') {
-                            es.close();
-                            showError(`Fatal error: ${payload.error}`);
+                        } else {
+                            clearInterval(pollInterval);
                             setLoading(false);
-                        } else if (payload.type === 'done') {
-                            const sent = payload.sent || 0;
-                            const failed = payload.failed || 0;
-                            const pct = 100;
-                            progressBar.style.width = pct + '%';
-                            progressPct.textContent = pct + '%';
-                            progressCounts.textContent = `Sent: ${sent} • Failed: ${failed} • Total: ${payload.total || total}`;
-                            progressTitle.textContent = 'Completed';
-                            es.close();
-                            setLoading(false);
-                            if (failed === 0 && sent > 0) {
-                                showSuccess(`All ${sent} emails sent successfully!`);
-                            } else if (sent > 0) {
-                                showError(`Completed: ${sent} sent, ${failed} failed. Check details below.`);
-                            } else {
-                                showError('No emails were sent. Please check your credentials and try again.');
-                            }
+                            showError('Failed to check job status. Please try again.');
                         }
                     } catch (e) {
-                        console.error('Error parsing SSE data:', e);
+                        console.error('Error polling job status:', e);
+                        clearInterval(pollInterval);
+                        setLoading(false);
+                        showError('Network error while checking job status.');
                     }
-                };
-                
-                es.onerror = (error) => {
-                    console.error('SSE connection error:', error);
-                    if (!connectionLost) {
-                        connectionLost = true;
-                        es.close();
-                        
-                        // Fallback: check job status after a delay
-                        setTimeout(async () => {
-                            try {
-                                const statusResponse = await fetch(`/job-status/${jobId}`);
-                                if (statusResponse.ok) {
-                                    const statusData = await statusResponse.json();
-                                    if (statusData.done) {
-                                        const sent = statusData.sent || 0;
-                                        const failed = statusData.failed || 0;
-                                        if (sent > 0) {
-                                            showSuccess(`Job completed: ${sent} sent, ${failed} failed`);
-                                        } else {
-                                            showError('Job completed but no emails were sent. Check your credentials.');
-                                        }
-                                    } else {
-                                        showError('Connection lost. Job may still be running. Please check your email for results.');
-                                    }
-                                } else {
-                                    showError('Connection lost during sending. Please check the logs and try again.');
-                                }
-                            } catch (e) {
-                                showError('Connection lost during sending. Please check the logs and try again.');
-                            }
-                            setLoading(false);
-                        }, 5000);
-                    }
-                };
+                }, 2000); // Poll every 2 seconds
             } catch (err) {
                 showError('Network error. Please try again.');
             } finally {

@@ -166,96 +166,16 @@ def send_emails():
         return jsonify({'message': f'Failed to process request. Error: {str(e)}'}), 500
 
 # ==========================
-# Server-Sent Events (SSE)
+# Simple Job Status Tracking
 # ==========================
 
 # In-memory job registry: job_id -> {
-#   'queue': Queue of progress events,
-#   'started': bool,
-#   'done': bool
+#   'status': 'running'|'completed'|'failed',
+#   'progress': {'sent': int, 'failed': int, 'total': int},
+#   'results': [list of individual results],
+#   'error': str (if failed)
 # }
 jobs = {}
-
-def _enqueue_event(job_id, event_dict):
-    try:
-        jobs[job_id]['queue'].put(event_dict)
-    except Exception:
-        pass
-
-def _run_send_job(job_id, email_sender, email_password, recipients, subject, mail_body, image_data, image_filename):
-    successful_sends = 0
-    failed_sends = 0
-    total = len(recipients)
-
-    _enqueue_event(job_id, {
-        'type': 'start',
-        'total': total,
-        'subject': subject,
-        'attachment': image_filename or ''
-    })
-
-    try:
-        # Create SMTP connection with timeout
-        smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
-        smtp.starttls()
-        smtp.login(email_sender, email_password)
-        
-        # Test connection
-        _enqueue_event(job_id, {'type': 'info', 'message': 'Connected to Gmail SMTP successfully'})
-
-        for index, recipient in enumerate(recipients, start=1):
-            try:
-                msg = MIMEMultipart()
-                msg['From'] = email_sender
-                msg['To'] = recipient['email']
-                msg['Subject'] = subject
-
-                personalized_body = f"Hello {recipient['name']},\n\n{mail_body}"
-                msg.attach(MIMEText(personalized_body, 'plain'))
-
-                if image_data and image_filename:
-                    attachment = MIMEBase('application', 'octet-stream')
-                    attachment.set_payload(image_data)
-                    encoders.encode_base64(attachment)
-                    attachment.add_header('Content-Disposition', f'attachment; filename= {image_filename}')
-                    msg.attach(attachment)
-
-                smtp.sendmail(email_sender, recipient['email'], msg.as_string())
-                successful_sends += 1
-                _enqueue_event(job_id, {
-                    'type': 'success',
-                    'index': index,
-                    'email': recipient['email'],
-                    'name': recipient['name'],
-                    'sent': successful_sends,
-                    'failed': failed_sends
-                })
-            except Exception as send_error:
-                failed_sends += 1
-                _enqueue_event(job_id, {
-                    'type': 'error',
-                    'index': index,
-                    'email': recipient['email'],
-                    'name': recipient['name'],
-                    'error': str(send_error),
-                    'sent': successful_sends,
-                    'failed': failed_sends
-                })
-            finally:
-                # Small delay to prevent overwhelming Gmail
-                time.sleep(0.5)
-        
-        smtp.quit()
-    except Exception as e:
-        _enqueue_event(job_id, {'type': 'fatal', 'error': str(e)})
-    finally:
-        _enqueue_event(job_id, {
-            'type': 'done',
-            'sent': successful_sends,
-            'failed': failed_sends,
-            'total': total
-        })
-        jobs[job_id]['done'] = True
 
 def _parse_recipients_from_csv(file_storage):
     recipients = []
@@ -320,8 +240,8 @@ def start_send():
             return jsonify({'message': 'No valid email addresses found in CSV file'}), 400
         
         # Limit recipients for free tier (prevent timeout)
-        if len(recipients) > 50:
-            return jsonify({'message': 'Free tier limited to 50 recipients per batch. Please split your CSV.'}), 400
+        if len(recipients) > 20:
+            return jsonify({'message': 'Free tier limited to 20 recipients per batch. Please split your CSV.'}), 400
 
         # Attachment
         image_data = None
@@ -338,11 +258,16 @@ def start_send():
 
         # Create job
         job_id = str(uuid.uuid4())
-        jobs[job_id] = { 'queue': queue.Queue(), 'started': True, 'done': False }
+        jobs[job_id] = {
+            'status': 'running',
+            'progress': {'sent': 0, 'failed': 0, 'total': len(recipients)},
+            'results': [],
+            'error': None
+        }
 
         # Start thread
         worker = threading.Thread(
-            target=_run_send_job,
+            target=_run_send_job_simple,
             args=(job_id, email_sender, email_password, recipients, subject, mail_body, image_data, image_filename),
             daemon=True
         )
@@ -353,33 +278,64 @@ def start_send():
         print(f"Error starting job: {str(e)}")
         return jsonify({'message': f'Failed to start job. Error: {str(e)}'}), 500
 
-@app.route('/events/<job_id>')
-def events(job_id):
-    if job_id not in jobs:
-        return jsonify({'message': 'Invalid job id'}), 404
+def _run_send_job_simple(job_id, email_sender, email_password, recipients, subject, mail_body, image_data, image_filename):
+    successful_sends = 0
+    failed_sends = 0
+    total = len(recipients)
+    results = []
 
-    def stream():
-        q = jobs[job_id]['queue']
-        # Send an initial comment to establish stream
-        yield ": connected\n\n"
-        while True:
+    try:
+        # Create SMTP connection with timeout
+        smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
+        smtp.starttls()
+        smtp.login(email_sender, email_password)
+
+        for index, recipient in enumerate(recipients, start=1):
             try:
-                event = q.get(timeout=30)
-                yield f"data: {json.dumps(event)}\n\n"
-                if event.get('type') == 'done':
-                    break
-            except queue.Empty:
-                # Keepalive
-                yield ": keepalive\n\n"
-                if jobs[job_id]['done']:
-                    break
-        # Cleanup after done
-        try:
-            del jobs[job_id]
-        except Exception:
-            pass
+                msg = MIMEMultipart()
+                msg['From'] = email_sender
+                msg['To'] = recipient['email']
+                msg['Subject'] = subject
 
-    return Response(stream(), mimetype='text/event-stream')
+                personalized_body = f"Hello {recipient['name']},\n\n{mail_body}"
+                msg.attach(MIMEText(personalized_body, 'plain'))
+
+                if image_data and image_filename:
+                    attachment = MIMEBase('application', 'octet-stream')
+                    attachment.set_payload(image_data)
+                    encoders.encode_base64(attachment)
+                    attachment.add_header('Content-Disposition', f'attachment; filename= {image_filename}')
+                    msg.attach(attachment)
+
+                smtp.sendmail(email_sender, recipient['email'], msg.as_string())
+                successful_sends += 1
+                results.append({
+                    'type': 'success',
+                    'index': index,
+                    'email': recipient['email'],
+                    'name': recipient['name']
+                })
+            except Exception as send_error:
+                failed_sends += 1
+                results.append({
+                    'type': 'error',
+                    'index': index,
+                    'email': recipient['email'],
+                    'name': recipient['name'],
+                    'error': str(send_error)
+                })
+            finally:
+                # Update progress
+                jobs[job_id]['progress'] = {'sent': successful_sends, 'failed': failed_sends, 'total': total}
+                jobs[job_id]['results'] = results
+                # Small delay to prevent overwhelming Gmail
+                time.sleep(0.5)
+        
+        smtp.quit()
+        jobs[job_id]['status'] = 'completed'
+    except Exception as e:
+        jobs[job_id]['status'] = 'failed'
+        jobs[job_id]['error'] = str(e)
 
 @app.route('/job-status/<job_id>')
 def job_status(job_id):
@@ -388,8 +344,10 @@ def job_status(job_id):
     
     job = jobs[job_id]
     return jsonify({
-        'done': job['done'],
-        'started': job['started']
+        'status': job['status'],
+        'progress': job['progress'],
+        'results': job['results'],
+        'error': job['error']
     })
 
 if __name__ == '__main__':
